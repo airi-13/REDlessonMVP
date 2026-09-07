@@ -1,0 +1,37 @@
+name: Fix login catch
+on:
+  push:
+    branches: [main]
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make login error handling safe
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for name in ['src/index.ts','src/admin.ts']:
+              p=Path(name); s=p.read_text(); old=s
+              s=s.replace("async function login(){const button=document.querySelector('.login-submit');try{const sidEl=document.getElementById('sid');const pwEl=document.getElementById('pw');const msgEl=document.getElementById('msg');", "async function login(){const button=document.querySelector('.login-submit');const msgEl=document.getElementById('msg');try{const sidEl=document.getElementById('sid');const pwEl=document.getElementById('pw');")
+              s=s.replace("async function login(){const button=document.querySelector('.login-submit');try{const auEl=document.getElementById('au');const apEl=document.getElementById('ap');const msgEl=document.getElementById('msg');", "async function login(){const button=document.querySelector('.login-submit');const msgEl=document.getElementById('msg');try{const auEl=document.getElementById('au');const apEl=document.getElementById('ap');")
+              if s != old:
+                  p.write_text(s); print('patched',name)
+          PY
+          git diff --check
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/index.ts src/admin.ts
+          git commit -m 'Fix login error feedback'
+          git push
+      - name: Remove temporary workflow
+        if: always()
+        run: |
+          rm -f .github/workflows/fix-login-catch.yml
+          git add .github/workflows/fix-login-catch.yml
+          git diff --cached --quiet || git commit -m 'Remove temporary login catch workflow'
+          git push || true
