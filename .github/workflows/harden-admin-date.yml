@@ -1,0 +1,36 @@
+name: Harden admin date validation
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, 'Harden admin date validation') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch admin date validation
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('src/admin.ts')
+          s=p.read_text()
+          marker="function parseId(path:string,prefix:string){const m=path.match(new RegExp('^'+prefix+'/(\\\\d+)$'));return m?Number(m[1]):null}"
+          helper=marker+"\nfunction validDate(value:string){if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))return false;const d=new Date(`${value}T00:00:00+09:00`);return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===value}"
+          if "function validDate(value:string)" not in s:
+            if marker not in s: raise SystemExit('parseId marker not found')
+            s=s.replace(marker,helper,1)
+          old="if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(b.date)||!PERIODS[b.period])return json({error:'日付またはコマが不正です'},400);"
+          new="if(!validDate(b.date)||!PERIODS[b.period])return json({error:'日付またはコマが不正です'},400);"
+          if old not in s: raise SystemExit('date validation pattern not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/harden-admin-date.yml
+          git add src/admin.ts
+          git commit -m "Harden admin date validation"
+          git push
