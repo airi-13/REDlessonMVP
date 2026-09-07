@@ -1,0 +1,33 @@
+name: Fix login runtime
+on:
+  push:
+    branches: [main]
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[login-runtime-fix]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch login runtime
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/index.ts')
+          s=p.read_text()
+          s=s.replace("async function api(path,opt={}){const r=await fetch(path,{headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});", "async function api(path,opt={}){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000);let r;try{r=await fetch(path,{...opt,headers:{'Content-Type':'application/json',...(opt.headers||{})},signal:controller.signal})}catch(e){clearTimeout(timer);throw Error(e?.name==='AbortError'?'通信がタイムアウトしました':'通信に失敗しました')}clearTimeout(timer);")
+          s=s.replace("who.textContent=d.name+'（'+d.studentId+'）';await load()", "const whoEl=document.getElementById('who');if(whoEl)whoEl.textContent=d.name+'（'+d.studentId+'）';await load()")
+          s=s.replace("lessons.innerHTML=d.lessons", "const lessonsEl=document.getElementById('lessons');if(!lessonsEl)throw Error('授業一覧の表示領域が見つかりません');lessonsEl.innerHTML=d.lessons")
+          s=s.replace("entitlements.innerHTML='';for(const x of e.entitlements)", "const entitlementsEl=document.getElementById('entitlements');if(!entitlementsEl)throw Error('振替一覧の表示領域が見つかりません');entitlementsEl.innerHTML='';for(const x of e.entitlements)")
+          s=s.replace("entitlements.appendChild(box)", "entitlementsEl.appendChild(box)")
+          s=s.replace("entitlements.innerHTML='<p class=\"muted\">利用可能な振替はありません。</p>'", "entitlementsEl.innerHTML='<p class=\"muted\">利用可能な振替はありません。</p>'")
+          s=s.replace("if(msgEl)msgEl.textContent='一致するログインデータがありません';", "if(msgEl)msgEl.textContent=e instanceof Error&&e.message&&e.message!=='エラー'?e.message:'一致するログインデータがありません';")
+          s=s.replace("return new Response(html,{headers:{'Content-Type':'text/html; charset=utf-8'}})", "return new Response(html,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store, no-cache, must-revalidate'}})")
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/index.ts
+          git commit -m 'Harden login runtime [login-runtime-fix]' || exit 0
+          git push
