@@ -13,5 +13,5 @@ crons = ["0 * * * *"]
 
 [vars]
 APP_TIMEZONE = "Asia/Tokyo"
-ADMIN_USER = "admin"
+ADMIN_USER = "kanri"
 # Set ADMIN_PASSWORD and SESSION_SECRET as secrets; never commit them.
