@@ -1,3 +1,5 @@
+import { adminRouter } from './admin';
+
 export interface Env {
   DB: D1Database;
   ADMIN_USER: string;
@@ -55,6 +57,7 @@ export default {async fetch(req:Request,env:Env){
   try{
     if(req.method==='POST'&&u.pathname==='/api/login'){const b=await req.json<any>();const st=await env.DB.prepare('SELECT id,student_id,name,password_hash,active FROM students WHERE student_id=?').bind(b.studentId).first<any>();if(!st||!st.active||!(await verifyPassword(b.password,st.password_hash)))return json({error:'IDまたはパスワードが違います'},401);return new Response(JSON.stringify({studentId:st.student_id,name:st.name}),{headers:{'Content-Type':'application/json','Set-Cookie':cookie(await token(env,String(st.id)))}})}
     if(req.method==='POST'&&u.pathname==='/api/logout')return new Response('{}',{headers:{'Content-Type':'application/json','Set-Cookie':cookie('',0)}});
+    if(u.pathname.startsWith('/api/admin')||u.pathname==='/admin')return adminRouter(req,env,u);
     const st=await getStudent(req,env);if(u.pathname==='/api/me'){if(!st)return json({error:'未ログイン'},401);return json({studentId:st.student_id,name:st.name})}if(!st)return json({error:'未ログイン'},401);
     if(req.method==='GET'&&u.pathname==='/api/me/lessons'){const now=tokyoParts();const from=`${now.year}-${now.month}-${now.day}`;const to=datePlus(from,14);await ensureLessons(env,st.id,from,to);const rows=await env.DB.prepare(`SELECT l.*,p.start_time,p.end_time FROM lessons l JOIN period_slots p ON p.period=l.period WHERE l.student_id=? AND l.lesson_date BETWEEN ? AND ? ORDER BY l.lesson_date,l.period`).bind(st.id,from,to).all<any>();const lessons=rows.results.map(l=>({id:l.id,date:l.lesson_date,period:l.period,start:l.start_time,end:l.end_time,status:l.status,statusLabel:l.status==='absent'?'欠席':l.status==='cancelled'?'休講':l.status==='makeup_used'?'振替済み':'予定',canAbsence:l.status==='scheduled'&&Date.now()<=lessonStartMs(l.lesson_date,l.period)-300000}));return json({lessons})}
     if(req.method==='GET'&&u.pathname==='/api/me/entitlements'){const r=await env.DB.prepare(`SELECT e.id,l.lesson_date originalDate,l.period originalPeriod FROM makeup_entitlements e JOIN lessons l ON l.id=e.original_lesson_id WHERE e.student_id=? AND e.used_lesson_id IS NULL ORDER BY l.lesson_date`).bind(st.id).all<any>();return json({entitlements:r.results})}
