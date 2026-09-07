@@ -2,6 +2,8 @@ name: Patch login override
 on:
   push:
     branches: [main]
+
+# One-time login runtime patch.
 jobs:
   patch:
     if: ${{ !contains(github.event.head_commit.message, '[login-override]') }}
