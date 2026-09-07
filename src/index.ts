@@ -1,0 +1,68 @@
+export interface Env {
+  DB: D1Database;
+  ADMIN_USER: string;
+  ADMIN_PASSWORD: string;
+  SESSION_SECRET: string;
+  APP_TIMEZONE: string;
+}
+
+const PERIODS: Record<number, [string, string]> = {
+  1: ['15:00', '15:40'], 2: ['15:45', '16:25'], 3: ['16:30', '17:10'], 4: ['17:15', '17:55'],
+  5: ['18:00', '18:40'], 6: ['18:45', '19:25'], 7: ['19:30', '20:10'], 8: ['20:15', '20:55'],
+};
+
+const html = `<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RED授業管理簡易VER</title><style>
+body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f5f6f8;color:#172033}header{background:#172033;color:white;padding:18px 22px}main{max-width:960px;margin:24px auto;padding:0 16px}.card{background:white;border-radius:14px;padding:20px;margin-bottom:18px;box-shadow:0 2px 10px #0000000d}input,button,select{font:inherit;padding:10px;border:1px solid #ccd2dc;border-radius:8px}button{cursor:pointer;background:#172033;color:white;border:0}.row{display:flex;gap:10px;flex-wrap:wrap}.lesson{padding:12px 0;border-bottom:1px solid #e7e9ee}.muted{color:#687386}.danger{color:#b42318}.success{color:#067647}.hidden{display:none}table{width:100%;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #e7e9ee;text-align:left}
+</style></head><body><header><strong>RED授業管理簡易VER</strong></header><main>
+<section id="login" class="card"><h2>ログイン</h2><div class="row"><input id="sid" placeholder="生徒ID"><input id="pw" type="password" placeholder="パスワード"><button onclick="login()">ログイン</button></div><p id="msg" class="muted"></p></section>
+<section id="app" class="hidden"><div class="card"><div class="row" style="justify-content:space-between"><h2>授業予定</h2><button onclick="logout()">ログアウト</button></div><p id="who" class="muted"></p><div id="lessons"></div></div><div class="card"><h2>振替可能</h2><div id="entitlements"></div></div></section>
+</main><script>
+async function api(path,opt={}){const r=await fetch(path,{headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'エラー');return d}
+async function login(){try{const d=await api('/api/login',{method:'POST',body:JSON.stringify({studentId:sid.value,password:pw.value})});document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');who.textContent=d.name+'（'+d.studentId+'）';await load()}catch(e){msg.textContent=e.message}}
+async function load(){try{const d=await api('/api/me/lessons');lessons.innerHTML=d.lessons.map(x=>'<div class="lesson"><b>'+x.date+' '+x.period+'限</b> '+x.start+'–'+x.end+' <span class="muted">'+x.statusLabel+'</span>'+(x.canAbsence?' <button onclick="absence('+x.id+')">欠席にする</button>':'')+'</div>').join('')||'<p class="muted">授業はありません。</p>';const e=await api('/api/me/entitlements');entitlements.innerHTML=e.entitlements.map(x=>'<div class="lesson">'+x.originalDate+' '+x.originalPeriod+'限の振替権 <button onclick="makeup('+x.id+')">振替を登録</button></div>').join('')||'<p class="muted">利用可能な振替はありません。</p>'}catch(e){alert(e.message)}}
+async function absence(id){if(confirm('この授業を欠席登録しますか？')){try{await api('/api/me/absence',{method:'POST',body:JSON.stringify({lessonId:id})});await load()}catch(e){alert(e.message)}}}
+async function makeup(id){const date=prompt('振替日を YYYY-MM-DD で入力');const period=Number(prompt('振替コマ（1〜8）'));if(!date||!(period>=1&&period<=8))return;try{await api('/api/me/makeup',{method:'POST',body:JSON.stringify({entitlementId:id,date,period})});await load()}catch(e){alert(e.message)}}
+async function logout(){await api('/api/logout',{method:'POST'});location.reload()}
+(async()=>{try{const d=await api('/api/me');document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');who.textContent=d.name+'（'+d.studentId+'）';await load()}catch(_){}})();
+</script></body></html>`;
+
+function b64(data: ArrayBuffer | string) {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+  let s = ''; for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function unb64(s:string){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);return new Uint8Array([...bin].map(c=>c.charCodeAt(0)))}
+async function hmac(secret:string,data:string){const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return b64(await crypto.subtle.sign('HMAC',k,new TextEncoder().encode(data)))}
+async function token(env:Env,sub:string,role='student'){const p=b64(JSON.stringify({sub,role,exp:Date.now()+86400000}));return p+'.'+await hmac(env.SESSION_SECRET,p)}
+async function session(req:Request,env:Env){const c=req.headers.get('Cookie')?.match(/(?:^|; )session=([^;]+)/)?.[1];if(!c)return null;const [p,s]=c.split('.');if(!p||!s||s!==await hmac(env.SESSION_SECRET,p))return null;try{const x=JSON.parse(new TextDecoder().decode(unb64(p)));return x.exp>Date.now()?x:null}catch{return null}}
+function json(x:any,status=200){return new Response(JSON.stringify(x),{status,headers:{'Content-Type':'application/json'}})}
+function cookie(value:string,maxAge=86400){return `session=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`}
+function tokyoParts(date=new Date()){const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(date);return Object.fromEntries(p.filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));}
+function datePlus(date:string,n:number){const d=new Date(date+'T00:00:00+09:00');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+function lessonStartMs(date:string,period:number){const [h,m]=PERIODS[period][0].split(':').map(Number);return new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00+09:00`).getTime()}
+async function ensureLessons(env:Env,studentDbId:number,from:string,to:string){
+  const weekly=await env.DB.prepare('SELECT weekday,period FROM weekly_lessons WHERE student_id=? AND active=1').bind(studentDbId).all<{weekday:number,period:number}>();
+  const batch=[] as D1PreparedStatement[];
+  for(let i=0;i<=14;i++){const date=datePlus(from,i);if(date>to)break;const wd=new Date(`${date}T00:00:00+09:00`).getDay();for(const w of weekly.results){if(w.weekday===wd)batch.push(env.DB.prepare("INSERT OR IGNORE INTO lessons(student_id,lesson_date,period,source) VALUES(?,?,?,'weekly')").bind(studentDbId,date,w.period));}}
+  if(batch.length)await env.DB.batch(batch);
+}
+async function getStudent(req:Request,env:Env){const s=await session(req,env);if(!s||s.role!=='student')return null;const r=await env.DB.prepare('SELECT id,student_id,name,active FROM students WHERE id=?').bind(Number(s.sub)).first<any>();return r?.active?r:null}
+
+export default {async fetch(req:Request,env:Env){
+  const u=new URL(req.url);if(req.method==='GET'&&u.pathname==='/')return new Response(html,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  try{
+    if(req.method==='POST'&&u.pathname==='/api/login'){const b=await req.json<any>();const st=await env.DB.prepare('SELECT id,student_id,name,password_hash,active FROM students WHERE student_id=?').bind(b.studentId).first<any>();if(!st||!st.active||!(await verifyPassword(b.password,st.password_hash)))return json({error:'IDまたはパスワードが違います'},401);return new Response(JSON.stringify({studentId:st.student_id,name:st.name}),{headers:{'Content-Type':'application/json','Set-Cookie':cookie(await token(env,String(st.id)))}})}
+    if(req.method==='POST'&&u.pathname==='/api/logout')return new Response('{}',{headers:{'Content-Type':'application/json','Set-Cookie':cookie('',0)}});
+    const st=await getStudent(req,env);if(u.pathname==='/api/me'){if(!st)return json({error:'未ログイン'},401);return json({studentId:st.student_id,name:st.name})}if(!st)return json({error:'未ログイン'},401);
+    if(req.method==='GET'&&u.pathname==='/api/me/lessons'){const now=tokyoParts();const from=`${now.year}-${now.month}-${now.day}`;const to=datePlus(from,14);await ensureLessons(env,st.id,from,to);const rows=await env.DB.prepare(`SELECT l.*,p.start_time,p.end_time FROM lessons l JOIN period_slots p ON p.period=l.period WHERE l.student_id=? AND l.lesson_date BETWEEN ? AND ? ORDER BY l.lesson_date,l.period`).bind(st.id,from,to).all<any>();const lessons=rows.results.map(l=>({id:l.id,date:l.lesson_date,period:l.period,start:l.start_time,end:l.end_time,status:l.status,statusLabel:l.status==='absent'?'欠席':l.status==='cancelled'?'休講':l.status==='makeup_used'?'振替済み':'予定',canAbsence:l.status==='scheduled'&&Date.now()<=lessonStartMs(l.lesson_date,l.period)-300000}));return json({lessons})}
+    if(req.method==='GET'&&u.pathname==='/api/me/entitlements'){const r=await env.DB.prepare(`SELECT e.id,l.lesson_date originalDate,l.period originalPeriod FROM makeup_entitlements e JOIN lessons l ON l.id=e.original_lesson_id WHERE e.student_id=? AND e.used_lesson_id IS NULL ORDER BY l.lesson_date`).bind(st.id).all<any>();return json({entitlements:r.results})}
+    if(req.method==='POST'&&u.pathname==='/api/me/absence'){const b=await req.json<any>();const l=await env.DB.prepare('SELECT * FROM lessons WHERE id=? AND student_id=?').bind(b.lessonId,st.id).first<any>();if(!l||l.status!=='scheduled')return json({error:'対象授業がありません'},400);if(Date.now()>lessonStartMs(l.lesson_date,l.period)-300000)return json({error:'欠席登録は授業開始5分前までです'},400);await env.DB.batch([env.DB.prepare("UPDATE lessons SET status='absent' WHERE id=?").bind(l.id),env.DB.prepare('INSERT OR IGNORE INTO makeup_entitlements(student_id,original_lesson_id) VALUES(?,?)').bind(st.id,l.id)]);return json({ok:true})}
+    if(req.method==='POST'&&u.pathname==='/api/me/makeup'){const b=await req.json<any>();if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(b.date)||!PERIODS[b.period])return json({error:'日付またはコマが不正です'},400);const e=await env.DB.prepare(`SELECT e.*,l.lesson_date originalDate,l.period originalPeriod FROM makeup_entitlements e JOIN lessons l ON l.id=e.original_lesson_id WHERE e.id=? AND e.student_id=? AND e.used_lesson_id IS NULL`).bind(b.entitlementId,st.id).first<any>();if(!e)return json({error:'利用できる振替権がありません'},400);const av=await env.DB.prepare('SELECT available FROM weekday_availability WHERE weekday=? AND period=?').bind(new Date(`${b.date}T00:00:00+09:00`).getDay(),b.period).first<any>();if(av?.available===0)return json({error:'その曜日・コマは利用できません'},400);if(b.date<e.originalDate)return json({error:'振替日は欠席日以降を指定してください'},400);const exists=await env.DB.prepare('SELECT id FROM lessons WHERE student_id=? AND lesson_date=? AND period=?').bind(st.id,b.date,b.period).first();if(exists)return json({error:'その時間には既に授業があります'},400);const r=await env.DB.prepare("INSERT INTO lessons(student_id,lesson_date,period,source,original_lesson_id) VALUES(?,?,?,'makeup',?) RETURNING id").bind(st.id,b.date,b.period,e.original_lesson_id).first<any>();await env.DB.prepare('UPDATE makeup_entitlements SET used_lesson_id=? WHERE id=?').bind(r.id,e.id).run();return json({ok:true})}
+    return json({error:'Not Found'},404);
+  }catch(e){console.error(e);return json({error:'サーバーエラー'},500)}
+}};
+
+async function verifyPassword(password:string,stored:string){const [salt,hash]=stored.split('$');if(!salt||!hash)return false;const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:unb64(salt),iterations:120000,hash:'SHA-256'},k,256);return b64(bits)===hash}
+export async function hashPassword(password:string){const salt=crypto.getRandomValues(new Uint8Array(16));const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:120000,hash:'SHA-256'},k,256);return `${b64(salt)}$${b64(bits)}`}
