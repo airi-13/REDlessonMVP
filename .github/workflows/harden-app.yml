@@ -1,0 +1,44 @@
+name: Harden app
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  harden:
+    if: ${{ !contains(github.event.head_commit.message, 'Harden app') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply hardening
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('src/index.ts')
+          s=p.read_text()
+          s=s.replace("function lessonEndMs(date:string,period:number){const [h,m]=PERIODS[period][1].split(':').map(Number);return new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00+09:00`).getTime()}", "function lessonEndMs(date:string,period:number){const [h,m]=PERIODS[period][1].split(':').map(Number);return new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00+09:00`).getTime()}\nfunction validDate(value:string){if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))return false;const d=new Date(`${value}T00:00:00+09:00`);return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===value}")
+          s=s.replace("if(lessonEndMs(date,a.period)<=now)continue;", "if(lessonStartMs(date,a.period)<=now)continue;")
+          s=s.replace("const e=await env.DB.prepare(`SELECT e.id,e.original_lesson_id,l.lesson_date originalDate FROM makeup_entitlements e JOIN lessons l ON l.id=e.original_lesson_id WHERE e.id=? AND e.student_id=? AND e.used_lesson_id IS NULL`).bind(id,st.id).first<any>();", "const e=await env.DB.prepare(`SELECT e.id,e.original_lesson_id,l.lesson_date originalDate FROM makeup_entitlements e JOIN lessons l ON l.id=e.original_lesson_id WHERE e.id=? AND e.student_id=? AND e.used_lesson_id IS NULL AND l.status='absent'`).bind(id,st.id).first<any>();")
+          s=s.replace("if(!/^\\\\d{4}-\\\\d{2}-\\\\d{2}$/.test(b.date)||!PERIODS[b.period])return json({error:'日付またはコマが不正です'},400);", "if(!validDate(b.date)||!PERIODS[b.period])return json({error:'日付またはコマが不正です'},400);")
+          s=s.replace("const e=await env.DB.prepare(`SELECT e.*,l.lesson_date originalDate FROM makeup_entitlements e JOIN lessons l ON l.id=e.original_lesson_id WHERE e.id=? AND e.student_id=? AND e.used_lesson_id IS NULL`).bind(b.entitlementId,st.id).first<any>();", "const e=await env.DB.prepare(`SELECT e.*,l.lesson_date originalDate FROM makeup_entitlements e JOIN lessons l ON l.id=e.original_lesson_id WHERE e.id=? AND e.student_id=? AND e.used_lesson_id IS NULL AND l.status='absent'`).bind(b.entitlementId,st.id).first<any>();")
+          s=s.replace("if(lessonEndMs(b.date,b.period)<=Date.now())return json({error:'過去または終了済みのコマは振替先にできません'},400);", "if(lessonStartMs(b.date,b.period)<=Date.now())return json({error:'開始済みのコマは振替先にできません'},400);")
+          p.write_text(s)
+          p=Path('src/admin.ts')
+          s=p.read_text()
+          old="students.innerHTML='<table><tr><th>ID</th><th>氏名</th><th>状態</th><th></th></tr>'+s.students.map(x=>'<tr><td>'+x.studentId+'</td><td>'+x.name+'</td><td>'+(x.active?'有効':'無効')+'</td><td><button onclick=\"toggleStudent('+x.id+','+(!x.active)+')\">'+(x.active?'無効化':'有効化')+'</button></td></tr>').join('')+'</table>';"
+          new="students.innerHTML='<table><tr><th>ID</th><th>氏名</th><th>状態</th><th>操作</th></tr>'+s.students.map(x=>'<tr><td>'+x.studentId+'</td><td><input id=\"sn-'+x.id+'\" value=\"'+x.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\\"/g,'&quot;')+'\"></td><td>'+(x.active?'有効':'無効')+'</td><td><input id=\"sp-'+x.id+'\" type=\"password\" placeholder=\"変更時のみ\"><button onclick=\"saveStudent('+x.id+')\">保存</button> <button onclick=\"toggleStudent('+x.id+','+(!x.active)+')\">'+(x.active?'無効化':'有効化')+'</button></td></tr>').join('')+'</table>';"
+          if old not in s: raise SystemExit('student table pattern not found')
+          s=s.replace(old,new)
+          marker="async function toggleStudent(id,active){try{await api('/api/admin/students/'+id,{method:'PATCH',body:JSON.stringify({active})});await loadAll()}catch(e){alert(e.message)}}"
+          replacement=marker+"async function saveStudent(id){try{const name=document.getElementById('sn-'+id).value.trim(),password=document.getElementById('sp-'+id).value;if(!name)return alert('氏名は必須です');const body={name};if(password)body.password=password;await api('/api/admin/students/'+id,{method:'PATCH',body:JSON.stringify(body)});await loadAll()}catch(e){alert(e.message)}}"
+          if marker not in s: raise SystemExit('toggle marker not found')
+          s=s.replace(marker,replacement)
+          p.write_text(s)
+      - name: Commit and remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/harden-app.yml
+          git add src/index.ts src/admin.ts
+          git commit -m "Harden app"
+          git push
