@@ -1,8 +1,11 @@
 name: Fix unified login
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 jobs:
   fix:
+    if: ${{ !contains(github.event.head_commit.message, 'Fix unified student and admin login') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
