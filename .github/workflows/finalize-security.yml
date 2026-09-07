@@ -1,0 +1,30 @@
+name: Finalize security
+on:
+  push:
+    branches: [main]
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, 'Finalize security patch') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch entitlement status check
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/index.ts')
+          s=p.read_text()
+          old="WHERE e.student_id=? AND e.used_lesson_id IS NULL ORDER BY l.lesson_date"
+          new="WHERE e.student_id=? AND e.used_lesson_id IS NULL AND l.status='absent' ORDER BY l.lesson_date"
+          if old not in s: raise SystemExit('target not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/index.ts
+          git commit -m 'Finalize security patch' || exit 0
+          git push
