@@ -1,0 +1,52 @@
+name: Cleanup UI
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: ${{ !contains(github.event.head_commit.message, 'Clean up UI') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+      - name: Rewrite UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/index.ts')
+          s = p.read_text()
+          # Remove branded header/logo and admin-login link from the student screen.
+          s = re.sub(r'<header>.*?</header>', '<header><strong>授業管理</strong></header>', s, count=1, flags=re.S)
+          s = re.sub(r'<a class="admin-link" href="/admin">.*?</a>', '', s, count=1, flags=re.S)
+          # Replace the student login area with ID/password/button only.
+          s = re.sub(r'<section id="login".*?</section>', '<section id="login" class="card"><h2>ログイン</h2><div class="login-form"><label for="sid">生徒ID</label><input id="sid" autocomplete="username"><label for="pw">パスワード</label><input id="pw" type="password" autocomplete="current-password"><button onclick="login()">ログイン</button><p id="msg" class="muted"></p></section>', s, count=1, flags=re.S)
+          # Put logout at the top-right of the student app header.
+          s = s.replace('<div class="card"><div class="row" style="justify-content:space-between"><h2>授業予定</h2><button onclick="logout()">ログアウト</button></div>', '<div class="card"><div class="app-head"><h2>授業予定</h2><button class="logout" onclick="logout()">ログアウト</button></div>', 1)
+          # Clean, neutral UI. No RED logo/color treatment.
+          css = '''body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#f5f6f8;color:#202124}header{background:#fff;color:#202124;padding:20px 28px;border-bottom:1px solid #e5e7eb}header strong{font-size:20px;font-weight:700}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 4px 18px #0000000a}.login-form{display:flex;flex-direction:column;gap:9px;max-width:360px}.login-form input{width:100%;box-sizing:border-box;padding:12px 13px;border:1px solid #d1d5db;border-radius:7px;background:#fff;font:inherit}.login-form button{margin-top:8px}.app-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.logout{margin-left:auto}.card button{background:#202124!important;color:#fff!important;border:0;border-radius:7px;padding:10px 14px;font:inherit;cursor:pointer}.card button:hover{background:#111!important}.card input:focus,.card select:focus{outline:2px solid #9ca3af;border-color:#6b7280}main{max-width:960px;margin:40px auto;padding:0 20px}#login{max-width:430px;margin:80px auto;padding:32px}#login h2{margin-top:0;margin-bottom:24px}.hidden{display:none}.muted{color:#6b7280}'''
+          s = re.sub(r'<style>.*?</style>', '<style>'+css+'</style>', s, count=1, flags=re.S)
+          p.write_text(s)
+
+          p = Path('src/admin.ts')
+          s = p.read_text()
+          s = re.sub(r'<header>.*?</header>', '<header><strong>授業管理</strong></header>', s, count=1, flags=re.S)
+          s = s.replace('<div class="row"><h2>生徒管理</h2><button onclick="logout()">ログアウト</button></div>', '<div class="app-head"><h2>生徒管理</h2><button class="logout" onclick="logout()">ログアウト</button></div>', 1)
+          css = '''body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#f5f6f8;color:#202124}header{background:#fff;color:#202124;padding:20px 28px;border-bottom:1px solid #e5e7eb}header strong{font-size:20px;font-weight:700}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 4px 18px #0000000a}.app-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.logout{margin-left:auto}.card button{background:#202124!important;color:#fff!important;border:0;border-radius:7px;padding:10px 14px;font:inherit;cursor:pointer}.card button:hover{background:#111!important}.card input:focus,.card select:focus{outline:2px solid #9ca3af;border-color:#6b7280}main{max-width:1100px;margin:40px auto;padding:0 20px}.hidden{display:none}.muted{color:#6b7280}'''
+          s = re.sub(r'<style>.*?</style>', '<style>'+css+'</style>', s, count=1, flags=re.S)
+          p.write_text(s)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/cleanup-ui.yml
+          git add src/index.ts src/admin.ts
+          git diff --cached --quiet || git commit -m 'Clean up UI'
+          git push
