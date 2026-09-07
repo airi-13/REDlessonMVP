@@ -8,7 +8,10 @@ database_name = "redlesson"
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
+[triggers]
+crons = ["0 * * * *"]
+
 [vars]
 APP_TIMEZONE = "Asia/Tokyo"
 ADMIN_USER = "admin"
-# Set ADMIN_PASSWORD as a secret; never commit it.
+# Set ADMIN_PASSWORD and SESSION_SECRET as secrets; never commit them.
