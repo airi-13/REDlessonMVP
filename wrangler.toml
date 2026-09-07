@@ -5,7 +5,7 @@ compatibility_date = "2026-09-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "redlesson"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "661c88a3-2b27-4337-b6d3-c9c19bb68c25"
 migrations_dir = "migrations"
 
 [triggers]
