@@ -1,0 +1,33 @@
+name: Force clean UI
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, 'Force clean UI') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix student and admin UI
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p=Path('src/index.ts'); s=p.read_text()
+          s=s.replace('header{background:#fff;color:#242424;padding:16px 22px;box-shadow:0 2px 10px #0002}header strong{display:flex;align-items:center;gap:10px}.card{border:1px solid #eee;box-shadow:0 2px 10px #0000000d}', 'header{display:none}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 2px 10px #0000000a}')
+          s=s.replace('<body><main>', '<body><main>')
+          p.write_text(s)
+          p=Path('src/admin.ts'); s=p.read_text()
+          s=s.replace('header{background:#fff;color:#202124;padding:14px 22px;border-top:3px solid #D13C18;box-shadow:0 1px 5px #00000012}', 'header{display:none}')
+          s=s.replace('<body><header><strong>授業管理</strong></header><main>', '<body><main>')
+          p.write_text(s)
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/index.ts src/admin.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'Force clean UI'
+          git push
