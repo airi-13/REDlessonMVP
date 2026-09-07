@@ -1,0 +1,31 @@
+name: Patch login override
+on:
+  push:
+    branches: [main]
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[login-override]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/index.ts')
+          s=p.read_text()
+          marker='</script></body></html>`;'
+          addition='''</script><script>window.login=async function(){const button=document.querySelector('.login-submit');const msgEl=document.getElementById('msg');const sidEl=document.getElementById('sid');const pwEl=document.getElementById('pw');try{const id=(sidEl?.value||'').trim();const password=pwEl?.value||'';if(!id||!password)throw Error('IDとパスワードを入力してください');if(button){button.disabled=true;button.textContent='ログイン中…';button.style.opacity='.7';button.style.cursor='wait'}if(msgEl)msgEl.textContent='';const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000);let r;try{r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({studentId:id,password}),signal:controller.signal})}catch(e){throw Error(e?.name==='AbortError'?'通信がタイムアウトしました':'通信に失敗しました')}finally{clearTimeout(timer)}const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'ログインに失敗しました');if(d.role==='admin'){location.href='/admin';return}document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');const whoEl=document.getElementById('who');if(whoEl)whoEl.textContent=d.name+'（'+d.studentId+'）';await load()}catch(e){if(msgEl)msgEl.textContent=e instanceof Error?e.message:'ログインに失敗しました';if(button){button.disabled=false;button.textContent='ログイン';button.style.opacity='';button.style.cursor=''}}};</script></body></html>`;'''
+          if marker not in s:
+              raise SystemExit('login marker not found')
+          s=s.replace(marker,addition,1)
+          s=s.replace("return new Response(html,{headers:{'Content-Type':'text/html; charset=utf-8'}})","return new Response(html,{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store, no-cache, must-revalidate'}})",1)
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/index.ts
+          git commit -m 'Fix login runtime reliably [login-override]' || exit 0
+          git push
