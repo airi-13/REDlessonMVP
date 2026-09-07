@@ -20,9 +20,8 @@ jobs:
           for name in ['src/index.ts','src/admin.ts']:
             p=Path(name); s=p.read_text()
             if 'brand-mark' not in s: s=s.replace('RED授業管理簡易VER',mark,1)
-            s=re.sub(r'<style>.*?</style>','<style>'+css+'</style>',s,count=1)
-            s=s.replace('<title>RED授業管理簡易VER</title>','<title>自立学習RED｜授業管理</title>',1)
-            s=s.replace('<title>RED授業管理 - 管理者</title>','<title>自立学習RED｜授業管理｜管理者</title>',1)
+            re.sub(r'<style>.*?</style>','<style>'+css+'</style>',s,count=1)
+            s=re.sub(r'<title>.*?</title>', '<title>'+('自立学習RED｜授業管理｜管理者' if name.endswith('admin.ts') else '自立学習RED｜授業管理')+'</title>', s, count=1)
             p.write_text(s)
       - name: Commit
         run: |
