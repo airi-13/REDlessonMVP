@@ -31,7 +31,8 @@ async function logout(){await api('/api/logout',{method:'POST'});location.reload
 
 function b64(data: ArrayBuffer | string) { const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data); let s=''; for(const b of bytes)s+=String.fromCharCode(b); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
 function unb64(s:string){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);return new Uint8Array([...bin].map(c=>c.charCodeAt(0)))}
-async function hmac(secret:string,data:string){const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return b64(await crypto.subtle.sign('HMAC',k,new TextEncoder().encode(data)))}
+function textBytes(value:string): BufferSource { return new TextEncoder().encode(value) as unknown as BufferSource; }
+async function hmac(secret:string,data:string){const k=await crypto.subtle.importKey('raw',textBytes(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return b64(await crypto.subtle.sign('HMAC',k,textBytes(data)))}
 async function token(env:Env,sub:string,role='student'){const p=b64(JSON.stringify({sub,role,exp:Date.now()+86400000}));return p+'.'+await hmac(env.SESSION_SECRET,p)}
 async function session(req:Request,env:Env){const c=req.headers.get('Cookie')?.match(/(?:^|; )session=([^;]+)/)?.[1];if(!c)return null;const [p,s]=c.split('.');if(!p||!s||s!==await hmac(env.SESSION_SECRET,p))return null;try{const x=JSON.parse(new TextDecoder().decode(unb64(p)));return x.exp>Date.now()?x:null}catch{return null}}
 function json(x:any,status=200){return new Response(JSON.stringify(x),{status,headers:{'Content-Type':'application/json'}})}
@@ -53,5 +54,5 @@ if(req.method==='POST'&&u.pathname==='/api/me/makeup'){const b=await req.json<an
 return json({error:'Not Found'},404);
 }catch(e){console.error(e);return json({error:'サーバーエラー'},500)}} ,async scheduled(_event:ScheduledEvent,env:Env){await ensureAllLessons(env,30)}};
 
-async function verifyPassword(password:string,stored:string){const [salt,hash]=stored.split('$');if(!salt||!hash)return false;const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:unb64(salt),iterations:120000,hash:'SHA-256'},k,256);return b64(bits)===hash}
-export async function hashPassword(password:string){const salt=crypto.getRandomValues(new Uint8Array(16));const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:120000,hash:'SHA-256'},k,256);return `${b64(salt)}$${b64(bits)}`}
+async function verifyPassword(password:string,stored:string){const [salt,hash]=stored.split('$');if(!salt||!hash)return false;const k=await crypto.subtle.importKey('raw',textBytes(password),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:unb64(salt) as unknown as BufferSource,iterations:120000,hash:'SHA-256'},k,256);return b64(bits)===hash}
+export async function hashPassword(password:string){const salt=crypto.getRandomValues(new Uint8Array(16));const k=await crypto.subtle.importKey('raw',textBytes(password),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:salt as unknown as BufferSource,iterations:120000,hash:'SHA-256'},k,256);return `${b64(salt)}$${b64(bits)}`}
