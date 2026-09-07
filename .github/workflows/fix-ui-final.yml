@@ -1,0 +1,38 @@
+name: Fix UI final
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, 'Fix UI final') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normalize UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in ['src/index.ts','src/admin.ts']:
+              p=Path(name); s=p.read_text()
+              s=s.replace('#d71920','#D13C18').replace('#D71920','#D13C18')
+              s=s.replace('#b9151b','#A82F12')
+              # Remove obsolete fake RED logo rules without touching functional markup.
+              import re
+              s=re.sub(r'\.brand-mark\{.*?\}', '', s)
+              s=re.sub(r'\.brand-name\{.*?\}', '', s)
+              s=re.sub(r'\.brand-sub\{.*?\}', '', s)
+              # Remove the colored header treatment; keep header neutral.
+              s=s.replace('header{background:#D13C18;color:#fff;', 'header{background:#fff;color:#242424;')
+              s=s.replace('header{background:#d71920;color:#fff;', 'header{background:#fff;color:#242424;')
+              p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/index.ts src/admin.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix UI final'
+          git push
