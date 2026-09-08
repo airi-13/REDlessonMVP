@@ -12,21 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Repair login flow
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path('src/index.ts')
           s=p.read_text()
-
-          # Remove the exact malformed tail introduced by the previous patch.
           bad="\n},k,256);return b64(bits)===b}catch{return false}}"
           if bad in s:
               s=s.replace(bad,'',1)
-
-          # Replace the verifier deterministically from its start to the next
-          # top-level function. This avoids matching braces inside deriveBits.
           start=s.find('async function verifyPassword(password:string,stored:string){')
           if start < 0:
               raise SystemExit('verifyPassword function not found')
@@ -45,12 +40,9 @@ jobs:
             }catch{return false}
           }"""
           s=s[:start]+verifier+s[end:]
-
-          # Enforce the corrected 9-digit student ID format.
           old="const loginId=String(b.studentId||'').trim();"
           new="const loginId=String(b.studentId||'').trim();if(loginId!=='kanri'&&!/^\\d{9}$/.test(loginId))return json({error:'IDまたはパスワードが違います'},401);"
           s=s.replace(old,new,1)
-
           p.write_text(s)
           PY
       - name: Validate TypeScript
