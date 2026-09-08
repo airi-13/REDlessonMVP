@@ -10,32 +10,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Normalize UI and repair login handlers
+      - name: Repair client JavaScript
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
-          for name in ['src/index.ts','src/admin.ts']:
-              p=Path(name); s=p.read_text()
-              s=s.replace('#d71920','#D13C18').replace('#D71920','#D13C18')
-              s=s.replace('#b9151b','#A82F12')
-              s=re.sub(r'\.brand-mark\{.*?\}', '', s)
-              s=re.sub(r'\.brand-name\{.*?\}', '', s)
-              s=re.sub(r'\.brand-sub\{.*?\}', '', s)
-              s=s.replace('header{background:#D13C18;color:#fff;', 'header{background:#fff;color:#242424;')
-              s=s.replace('header{background:#d71920;color:#fff;', 'header{background:#fff;color:#242424;')
-
-              if name == 'src/index.ts':
-                  s=s.replace('<button type="button" class="password-toggle" onclick="togglePassword()"', '<button type="button" class="password-toggle"')
-                  s=s.replace('<button class="login-submit" onclick="login()">ログイン</button>', '<button type="button" class="login-submit">ログイン</button>')
-                  s=s.replace('<button class="logout" onclick="logout()">ログアウト</button>', '<button type="button" class="logout">ログアウト</button>')
-                  s=s.replace('<meta name="viewport" content="width=device-width,initial-scale=1">', '<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,">')
-                  old="""document.addEventListener('DOMContentLoaded',()=>{\n  const form=document.querySelector('.login-form');\n  if(form)form.addEventListener('submit',login);\n  const button=document.querySelector('.login-submit');\n  if(button)button.addEventListener('click',login);"""
-                  new="""document.addEventListener('DOMContentLoaded',()=>{\n  const button=document.querySelector('.login-submit');\n  if(button)button.addEventListener('click',login);\n  const passwordToggle=document.querySelector('.password-toggle');\n  if(passwordToggle)passwordToggle.addEventListener('click',togglePassword);\n  const logoutButton=document.querySelector('.logout');\n  if(logoutButton)logoutButton.addEventListener('click',logout);"""
-                  if old not in s:
-                      raise SystemExit('expected login event block not found')
-                  s=s.replace(old,new,1)
-              p.write_text(s)
+          p=Path('src/index.ts')
+          s=p.read_text()
+          s=s.replace('#d71920','#D13C18').replace('#D71920','#D13C18').replace('#b9151b','#A82F12')
+          s=re.sub(r'\.brand-mark\{.*?\}', '', s)
+          s=re.sub(r'\.brand-name\{.*?\}', '', s)
+          s=re.sub(r'\.brand-sub\{.*?\}', '', s)
+          s=s.replace('header{background:#D13C18;color:#fff;', 'header{background:#fff;color:#242424;')
+          s=s.replace('header{background:#d71920;color:#fff;', 'header{background:#fff;color:#242424;')
+          if '<link rel="icon" href="data:,">' not in s:
+              s=s.replace('<meta name="viewport" content="width=device-width,initial-scale=1">', '<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,">')
+          s=s.replace('<button type="button" class="password-toggle" onclick="togglePassword()"', '<button type="button" class="password-toggle"')
+          s=s.replace('<button class="login-submit" onclick="login()">ログイン</button>', '<button type="button" class="login-submit">ログイン</button>')
+          s=s.replace('<button class="logout" onclick="logout()">ログアウト</button>', '<button type="button" class="logout">ログアウト</button>')
+          s=s.replace('async function login(e){', 'async function doLogin(e){', 1)
+          s=s.replace("button.addEventListener('click',login)", "button.addEventListener('click',doLogin)")
+          s=s.replace('login(e)', 'doLogin(e)')
+          old=re.search(r'async function loadSlots\(id\)\{.*?\nasync function absence', s, re.S)
+          if old:
+              new='''async function loadSlots(id){\n  try{\n    const d=await api('/api/me/makeup-slots?entitlementId='+encodeURIComponent(id));\n    const el=$(\'slots-\'+id);\n    if(!el)return;\n    el.innerHTML=\'\';\n    if(!d.slots.length){el.textContent=\'現在、選択できる振替枠はありません。\';return}\n    for(const x of d.slots){\n      const row=document.createElement(\'div\');row.className=\'slot\';\n      const span=document.createElement(\'span\');span.textContent=x.date+\'（\'+x.weekdayLabel+\'） \'+x.period+\'限 \'+x.start+\'–\'+x.end;\n      const button=document.createElement(\'button\');button.type=\'button\';button.textContent=\'この枠で振替\';\n      button.addEventListener(\'click\',()=>makeup(id,x.date,x.period));\n      row.append(span,button);el.appendChild(row);\n    }\n  }catch(e){const el=$(\'slots-\'+id);if(el)el.textContent=e.message||\'振替枠の取得に失敗しました\'}\n}\nasync function absence'''
+              s=s[:old.start()]+new+s[old.end():]
+          else:
+              raise SystemExit('loadSlots block not found')
+          s=s.replace("document.addEventListener('DOMContentLoaded',()=>{\n  const button=document.querySelector('.login-submit');\n  if(button)button.addEventListener('click',doLogin);", "document.addEventListener('DOMContentLoaded',()=>{\n  const button=document.querySelector('.login-submit');\n  if(button)button.addEventListener('click',doLogin);")
+          p.write_text(s)
+          PY
+      - name: Validate TypeScript and embedded browser JavaScript
+        run: |
+          npx tsc --noEmit
+          python3 - <<'PY'
+          import re, subprocess
+          s=open('src/index.ts',encoding='utf-8').read()
+          m=re.search(r'const html=`(.*?)`;\nfunction b64',s,re.S)
+          if not m: raise SystemExit('html template not found')
+          js=re.search(r'<script>(.*?)</script>',m.group(1),re.S)
+          if not js: raise SystemExit('script block not found')
+          open('/tmp/client.js','w',encoding='utf-8').write(js.group(1))
+          r=subprocess.run(['node','--check','/tmp/client.js'],text=True,capture_output=True)
+          print(r.stdout,end=''); print(r.stderr,end='')
+          raise SystemExit(r.returncode)
           PY
       - name: Commit
         run: |
