@@ -10,24 +10,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Normalize UI
+      - name: Normalize UI and repair login source
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          for name in ['src/index.ts','src/admin.ts']:
+          import re
+          p=Path('src/index.ts')
+          s=p.read_text()
+          bad="\n},k,256);return b64(bits)===b}catch{return false}}"
+          if bad in s:
+              s=s.replace(bad,'',1)
+          s=s.replace('#d71920','#D13C18').replace('#D71920','#D13C18')
+          s=s.replace('#b9151b','#A82F12')
+          s=re.sub(r'\.brand-mark\{.*?\}', '', s)
+          s=re.sub(r'\.brand-name\{.*?\}', '', s)
+          s=re.sub(r'\.brand-sub\{.*?\}', '', s)
+          s=s.replace('header{background:#D13C18;color:#fff;', 'header{background:#fff;color:#242424;')
+          s=s.replace('header{background:#d71920;color:#fff;', 'header{background:#fff;color:#242424;')
+          p.write_text(s)
+
+          for name in ['src/admin.ts']:
               p=Path(name); s=p.read_text()
               s=s.replace('#d71920','#D13C18').replace('#D71920','#D13C18')
               s=s.replace('#b9151b','#A82F12')
-              # Remove obsolete fake RED logo rules without touching functional markup.
-              import re
               s=re.sub(r'\.brand-mark\{.*?\}', '', s)
               s=re.sub(r'\.brand-name\{.*?\}', '', s)
               s=re.sub(r'\.brand-sub\{.*?\}', '', s)
-              # Remove the colored header treatment; keep header neutral.
               s=s.replace('header{background:#D13C18;color:#fff;', 'header{background:#fff;color:#242424;')
               s=s.replace('header{background:#d71920;color:#fff;', 'header{background:#fff;color:#242424;')
               p.write_text(s)
           PY
+      - name: Validate TypeScript
+        run: |
+          npm ci
+          npx tsc --noEmit
       - name: Commit
         run: |
           git config user.name github-actions[bot]
