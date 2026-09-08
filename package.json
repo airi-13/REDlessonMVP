@@ -1,6 +1,6 @@
 {
   "name": "redlesson-mvp",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "RED授業管理簡易VER",
   "type": "module",
