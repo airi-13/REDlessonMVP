@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
-    "deploy": "npm run db:migrations:apply && wrangler deploy"
+    "deploy": "npm run db:migrations:apply && wrangler deploy",
+    "verify": "tsc --noEmit"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
