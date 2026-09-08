@@ -22,24 +22,6 @@ jobs:
           bad="\n},k,256);return b64(bits)===b}catch{return false}}"
           if bad in s:
               s=s.replace(bad,'',1)
-          start=s.find('async function verifyPassword(password:string,stored:string){')
-          if start < 0:
-              raise SystemExit('verifyPassword function not found')
-          end=s.find('\nfunction ',start)
-          if end < 0:
-              raise SystemExit('next function after verifyPassword not found')
-          verifier="""async function verifyPassword(password:string,stored:string){
-            if(typeof stored!=='string')return false;
-            if(stored===password)return true;
-            try{
-              const[s,b]=stored.split('$');
-              if(!s||!b)return false;
-              const salt=unb64(s),k=await crypto.subtle.importKey('raw',textBytes(password),'PBKDF2',false,['deriveBits']);
-              const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:salt.buffer as ArrayBuffer,iterations:120000,hash:'SHA-256'},k,256);
-              return b64(bits)===b;
-            }catch{return false}
-          }"""
-          s=s[:start]+verifier+s[end:]
           old="const loginId=String(b.studentId||'').trim();"
           new="const loginId=String(b.studentId||'').trim();if(loginId!=='kanri'&&!/^\\d{9}$/.test(loginId))return json({error:'IDまたはパスワードが違います'},401);"
           s=s.replace(old,new,1)
