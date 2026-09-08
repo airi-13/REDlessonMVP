@@ -10,19 +10,124 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fix student and admin UI
+      - name: Repair student client
         shell: python
         run: |
           from pathlib import Path
           import re
-          p=Path('src/index.ts'); s=p.read_text()
-          s=s.replace('header{background:#fff;color:#242424;padding:16px 22px;box-shadow:0 2px 10px #0002}header strong{display:flex;align-items:center;gap:10px}.card{border:1px solid #eee;box-shadow:0 2px 10px #0000000d}', 'header{display:none}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 2px 10px #0000000a}')
-          s=s.replace('<body><main>', '<body><main>')
+          p=Path('src/index.ts')
+          s=p.read_text()
+
+          # Prevent favicon requests from reaching the Worker router.
+          if '<link rel="icon" href="data:,">' not in s:
+              s=s.replace('<meta name="viewport" content="width=device-width,initial-scale=1">', '<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,">', 1)
+
+          # Remove all fragile inline event handlers from the student page.
+          s=s.replace('<button type="button" class="password-toggle" onclick="togglePassword()"', '<button type="button" class="password-toggle"')
+          s=s.replace('<button class="login-submit" onclick="login()">ログイン</button>', '<button type="button" class="login-submit">ログイン</button>')
+          s=s.replace('<button class="logout" onclick="logout()">ログアウト</button>', '<button type="button" class="logout">ログアウト</button>')
+
+          # Avoid the browser-global login() name and its old inline-call path.
+          s=s.replace('async function login(e){', 'async function doLogin(e){', 1)
+          s=s.replace("button.addEventListener('click',login)", "button.addEventListener('click',doLogin)")
+          s=s.replace('login(e)', 'doLogin(e)')
+
+          # Replace quote-heavy lesson HTML with DOM construction.
+          load_new = r'''async function load(){
+            try{
+              const d=await api('/api/me/lessons');
+              const lessons=$('lessons');
+              if(!lessons)return;
+              lessons.innerHTML='';
+              if(!d.lessons.length){lessons.innerHTML='<p class="muted">授業はありません。</p>'}
+              for(const x of d.lessons){
+                const row=document.createElement('div'); row.className='lesson';
+                const title=document.createElement('b'); title.textContent=x.date+' '+x.period+'限'; row.appendChild(title);
+                row.appendChild(document.createTextNode(' '+x.start+'–'+x.end+' '));
+                const status=document.createElement('span'); status.className='muted'; status.textContent=x.statusLabel; row.appendChild(status);
+                if(x.canAbsence){
+                  const button=document.createElement('button'); button.type='button'; button.textContent='欠席にする';
+                  button.addEventListener('click',()=>absence(x.id)); row.appendChild(document.createTextNode(' ')); row.appendChild(button);
+                }
+                lessons.appendChild(row);
+              }
+              const e=await api('/api/me/entitlements');
+              const entitlements=$('entitlements');
+              if(!entitlements)return;
+              entitlements.innerHTML='';
+              if(!e.entitlements.length){entitlements.innerHTML='<p class="muted">利用可能な振替はありません。</p>';return}
+              for(const x of e.entitlements){
+                const box=document.createElement('div'); box.className='lesson';
+                const title=document.createElement('b'); title.textContent=x.originalDate+' '+x.originalPeriod+'限'; box.appendChild(title);
+                box.appendChild(document.createTextNode(' の振替権'));
+                const slots=document.createElement('div'); slots.id='slots-'+x.id; slots.className='muted'; slots.textContent='候補を読み込み中…';
+                box.appendChild(slots); entitlements.appendChild(box); loadSlots(x.id);
+              }
+            }catch(e){showMessage(e.message)}
+          }
+          async function loadSlots'''
+          s,n=re.subn(r'async function load\{.*?async function loadSlots', load_new, s, count=1, flags=re.S)
+          if n!=1:
+              raise SystemExit('load block not found')
+
+          slots_new = r'''async function loadSlots(id){
+            try{
+              const d=await api('/api/me/makeup-slots?entitlementId='+encodeURIComponent(id));
+              const el=$('slots-'+id); if(!el)return;
+              el.innerHTML='';
+              if(!d.slots.length){el.textContent='現在、選択できる振替枠はありません。';return}
+              for(const x of d.slots){
+                const row=document.createElement('div'); row.className='slot';
+                const span=document.createElement('span'); span.textContent=x.date+'（'+x.weekdayLabel+'） '+x.period+'限 '+x.start+'–'+x.end;
+                const button=document.createElement('button'); button.type='button'; button.textContent='この枠で振替';
+                button.addEventListener('click',()=>makeup(id,x.date,x.period));
+                row.append(span,button); el.appendChild(row);
+              }
+            }catch(e){const el=$('slots-'+id);if(el)el.textContent=e.message||'振替枠の取得に失敗しました'}
+          }
+          async function absence'''
+          s,n=re.subn(r'async function loadSlots\(id\)\{.*?\nasync function absence', slots_new, s, count=1, flags=re.S)
+          if n!=1:
+              raise SystemExit('loadSlots block not found')
+
+          # One event-binding block; no inline handlers and no browser-global login().
+          dom_new = r'''document.addEventListener('DOMContentLoaded',()=>{
+            const form=document.querySelector('.login-form');
+            if(form)form.addEventListener('submit',doLogin);
+            const button=document.querySelector('.login-submit');
+            if(button)button.addEventListener('click',doLogin);
+            const passwordToggle=document.querySelector('.password-toggle');
+            if(passwordToggle)passwordToggle.addEventListener('click',togglePassword);
+            const logoutButton=document.querySelector('.logout');
+            if(logoutButton)logoutButton.addEventListener('click',logout);
+            ['sid','pw'].forEach(id=>$(id)?.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin(e)}));
+            (async()=>{try{const d=await api('/api/me');$('login').classList.add('hidden');$('app').classList.remove('hidden');$('who').textContent=d.name+'（'+d.studentId+'）';await load()}catch(_){}})();
+          });'''
+          s,n=re.subn(r'document\.addEventListener\(\x27DOMContentLoaded\x27,\(\)=>\{.*?\n\}\);\n</script>', dom_new+'\n</script>', s, count=1, flags=re.S)
+          if n!=1:
+              raise SystemExit('DOMContentLoaded block not found')
+
+          # Remove the redundant duplicate login-ID checks while touching this file.
+          s=s.replace("if(loginId!='kanri'&&!/^\\d{9}$/.test(loginId))return json({error:'IDまたはパスワードが違います'},401);", "if(loginId!=='kanri'&&!/^\\d{9}$/.test(loginId))return json({error:'IDまたはパスワードが違います'},401);", 3)
+
           p.write_text(s)
-          p=Path('src/admin.ts'); s=p.read_text()
-          s=s.replace('header{background:#fff;color:#202124;padding:14px 22px;border-top:3px solid #D13C18;box-shadow:0 1px 5px #00000012}', 'header{display:none}')
-          s=s.replace('<body><header><strong>授業管理</strong></header><main>', '<body><main>')
-          p.write_text(s)
+
+      - name: Validate
+        run: |
+          npx tsc --noEmit
+          python3 - <<'PY'
+          import re,subprocess
+          s=open('src/index.ts',encoding='utf-8').read()
+          m=re.search(r'const html=`(.*?)`;\nfunction b64',s,re.S)
+          if not m: raise SystemExit('html template not found')
+          j=re.search(r'<script>(.*?)</script>',m.group(1),re.S)
+          if not j: raise SystemExit('script block not found')
+          js=j.group(1)
+          if 'onclick="' in m.group(1): raise SystemExit('inline onclick remains')
+          if 'login()' in js or 'login(e)' in js: raise SystemExit('old login reference remains')
+          open('/tmp/client.js','w',encoding='utf-8').write(js)
+          raise SystemExit(subprocess.run(['node','--check','/tmp/client.js']).returncode)
+          PY
       - name: Commit
         run: |
           git config user.name github-actions[bot]
