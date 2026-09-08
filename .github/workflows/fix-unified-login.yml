@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 jobs:
   fix:
-    if: ${{ !contains(github.event.head_commit.message, 'Fix unified student and admin login') }}
+    if: ${{ !contains(github.event.head_commit.message, 'Fix 9-digit student login authentication') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -15,25 +15,42 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('src/index.ts'); s=p.read_text()
-          old="async function login(){try{const d=await api('/api/login',{method:'POST',body:JSON.stringify({studentId:sid.value,password:pw.value})});document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');who.textContent=d.name+'（'+d.studentId+'）';await load()}catch(e){msg.textContent=e.message}}"
-          new="async function login(){try{const id=sid.value.trim(),password=pw.value;if(!id||!password)throw Error('IDとパスワードを入力してください');const d=await api('/api/login',{method:'POST',body:JSON.stringify({studentId:id,password})});if(d.role==='admin'){location.href='/admin';return}document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden');who.textContent=d.name+'（'+d.studentId+'）';await load()}catch(e){msg.textContent=e.message}}"
-          assert old in s
-          s=s.replace(old,new,1)
-          old="if(req.method==='POST'&&u.pathname==='/api/login'){const b=await req.json<any>();const st=await env.DB.prepare('SELECT id,student_id,name,password_hash,active FROM students WHERE student_id=?').bind(b.studentId).first<any>();if(!st||!st.active||!(await verifyPassword(b.password,st.password_hash)))return json({error:'IDまたはパスワードが違います'},401);return new Response(JSON.stringify({studentId:st.student_id,name:st.name}),{headers:{'Content-Type':'application/json','Set-Cookie':cookie(await token(env,String(st.id)))}})}"
-          new="if(req.method==='POST'&&u.pathname==='/api/login'){const b=await req.json<any>();const loginId=String(b.studentId||'').trim();if(loginId===env.ADMIN_USER){if(b.password!==env.ADMIN_PASSWORD)return json({error:'IDまたはパスワードが違います'},401);return new Response(JSON.stringify({role:'admin'}),{headers:{'Content-Type':'application/json','Set-Cookie':cookie(await token(env,'admin','admin'))}})}const st=await env.DB.prepare('SELECT id,student_id,name,password_hash,active FROM students WHERE student_id=?').bind(loginId).first<any>();if(!st||!st.active||!(await verifyPassword(b.password,st.password_hash)))return json({error:'IDまたはパスワードが違います'},401);return new Response(JSON.stringify({role:'student',studentId:st.student_id,name:st.name}),{headers:{'Content-Type':'application/json','Set-Cookie':cookie(await token(env,String(st.id),'student'))}})}"
-          assert old in s
-          p.write_text(s.replace(old,new,1))
-          p=Path('src/admin.ts'); s=p.read_text()
-          old="if(req.method==='GET'&&u.pathname==='/admin')return new Response(adminHtml,{headers:{'Content-Type':'text/html; charset=utf-8'}});"
-          new="if(req.method==='GET'&&u.pathname==='/admin'){if(!(await isAdmin(req,env)))return Response.redirect(new URL('/',req.url),302);return new Response(adminHtml,{headers:{'Content-Type':'text/html; charset=utf-8'}})}"
-          assert old in s
-          p.write_text(s.replace(old,new,1))
+          import re
+
+          p=Path('src/index.ts')
+          s=p.read_text()
+
+          s=re.sub(
+              r"async function verifyPassword\(password:string,stored:string\)\{.*?\n?\}",
+              """async function verifyPassword(password:string,stored:string){
+            if(typeof stored!=='string')return false;
+            if(stored===password)return true;
+            try{
+              const[s,b]=stored.split('$');
+              if(!s||!b)return false;
+              const salt=unb64(s),k=await crypto.subtle.importKey('raw',textBytes(password),'PBKDF2',false,['deriveBits']);
+              const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:salt.buffer as ArrayBuffer,iterations:120000,hash:'SHA-256'},k,256);
+              return b64(bits)===b;
+            }catch{return false}
+          }""",
+              s,count=1,flags=re.S
+          )
+
+          # Enforce the corrected student ID format without changing the
+          # existing admin credentials/configuration.
+          s=s.replace(
+              "const loginId=String(b.studentId||'').trim();",
+              "const loginId=String(b.studentId||'').trim();if(loginId!=='kanri'&&!/^\\d{9}$/.test(loginId))return json({error:'IDまたはパスワードが違います'},401);"
+          )
+
+          # Remove the duplicate client-side login implementation.
+          s=re.sub(r"<script>window\.login=async function\(\).*?</script>","",s,flags=re.S)
+          p.write_text(s)
           PY
       - name: Commit
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/index.ts src/admin.ts
-          git commit -m 'Fix unified student and admin login'
+          git add src/index.ts
+          git diff --cached --quiet || git commit -m 'Fix 9-digit student login authentication'
           git push
