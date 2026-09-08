@@ -10,15 +10,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Clean student login UI
+      - name: Repair login source and clean UI
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path('src/index.ts')
           s=p.read_text()
+          bad="\n},k,256);return b64(bits)===b}catch{return false}}"
+          if bad in s:
+              s=s.replace(bad,'',1)
           s=s.replace('<header><strong>授業管理</strong></header><main>', '<main>', 1)
           p.write_text(s)
           PY
+      - name: Validate TypeScript
+        run: |
+          npm ci
+          npx tsc --noEmit
       - name: Commit
         run: |
           git config user.name github-actions[bot]
