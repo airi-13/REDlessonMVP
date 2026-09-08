@@ -20,8 +20,6 @@ jobs:
           p=Path('src/index.ts')
           s=p.read_text()
 
-          # Replace the entire password verifier. The previous regex stopped
-          # at the first object-literal '}', leaving ',k,256)' in the source.
           verifier = """async function verifyPassword(password:string,stored:string){
             if(typeof stored!=='string')return false;
             if(stored===password)return true;
@@ -40,24 +38,22 @@ jobs:
               raise SystemExit('verifyPassword function not found')
           s=s2
 
-          # Enforce the corrected student ID format without changing the
-          # existing admin credentials/configuration.
           s=s.replace(
               "const loginId=String(b.studentId||'').trim();",
               "const loginId=String(b.studentId||'').trim();if(loginId!=='kanri'&&!/^\\d{9}$/.test(loginId))return json({error:'IDまたはパスワードが違います'},401);"
           )
 
-          # Remove the duplicate client-side login implementation.
           s=re.sub(r"<script>window\.login=async function\(\).*?</script>","",s,flags=re.S)
           p.write_text(s)
           PY
+      - name: Install dependencies
+        run: npm ci
       - name: Validate TypeScript
-        run: |
-          npx tsc --noEmit
+        run: npx tsc --noEmit
       - name: Commit
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add src/index.ts
-          git diff --cached --quiet || git commit -m 'Fix 9-digit student login authentication'
+          git diff --cached --quiet || git commit -m 'Fix 9-digit student login authentication [skip login patch]'
           git push
