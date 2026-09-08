@@ -4,6 +4,9 @@
   "private": true,
   "description": "RED授業管理簡易VER",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
