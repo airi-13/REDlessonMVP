@@ -1,0 +1,45 @@
+name: Fix login routing
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, 'Fix login routing') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply login routing
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('src/index.ts')
+          s=p.read_text(encoding='utf-8')
+          old="if(loginId!='kanri'&&!/^\\d{9}$/.test(loginId))return json({error:'IDまたはパスワードが違います'},401);"
+          new="if(loginId!==env.ADMIN_USER&&!/^1139\\d{5}$/.test(loginId))return json({error:'IDまたはパスワードが違います'},401);"
+          if old not in s:
+              raise SystemExit('expected login validation was not found')
+          s=s.replace(old,new)
+          p.write_text(s,encoding='utf-8')
+      - name: Validate browser JavaScript
+        run: |
+          python3 - <<'PY'
+          import re,subprocess
+          s=open('src/index.ts',encoding='utf-8').read()
+          m=re.search(r'const html=`(.*?)`;\nfunction b64',s,re.S)
+          if not m: raise SystemExit('html template not found')
+          j=re.search(r'<script>(.*?)</script>',m.group(1),re.S)
+          if not j: raise SystemExit('script block not found')
+          if 'onclick="' in m.group(1): raise SystemExit('inline onclick remains')
+          open('/tmp/client.js','w',encoding='utf-8').write(j.group(1))
+          raise SystemExit(subprocess.run(['node','--check','/tmp/client.js']).returncode)
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/index.ts
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix login routing'
+          git push
