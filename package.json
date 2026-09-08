@@ -1,6 +1,7 @@
 {
   "name": "redlesson-mvp",
   "private": true,
+  "description": "RED授業管理簡易VER",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
